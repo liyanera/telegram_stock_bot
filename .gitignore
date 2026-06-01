@@ -6,3 +6,4 @@ chroma_db/
 /tmp/
 *.log
 *.pid
+.playwright-mcp/
