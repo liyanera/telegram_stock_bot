@@ -67,6 +67,35 @@ TOOLS = [
         },
     },
     {
+        "name": "get_recommendations",
+        "description": (
+            "Get stock recommendations from the internal thesis database, ranked by credibility score. "
+            "ALWAYS use this tool when the user asks for stock recommendations, potential picks, "
+            "undervalued stocks, what to buy, or any request for a list of suggested stocks. "
+            "Returns bull/bear theses with credibility scores (0.0–1.0) based on how many times "
+            "each thesis has been validated by real price movements."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "thesis_type": {
+                    "type": "string",
+                    "description": "Filter by thesis type",
+                    "enum": ["bull", "bear", "all"],
+                },
+                "min_credibility": {
+                    "type": "number",
+                    "description": "Minimum credibility score (0.0–1.0). Use 0.0 to include all theses.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max number of recommendations to return (default 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "search_knowledge_base",
         "description": (
             "Search the internal knowledge base for analysis frameworks, investment methodologies, "

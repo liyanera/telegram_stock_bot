@@ -262,6 +262,40 @@ def update_thesis_credibility(thesis_id: int, consistent: bool):
         return cred
 
 
+def get_all_theses_ranked(
+    thesis_type: str = "bull",
+    min_credibility: float = 0.0,
+    limit: int = 10,
+) -> list:
+    """Return theses ranked by credibility, for use in recommendations tool."""
+    with Session() as session:
+        type_filter = "" if thesis_type == "all" else "AND thesis_type=:tt"
+        rows = session.execute(
+            text(
+                f"SELECT ticker, thesis_type, thesis, credibility, "
+                f"confirmed_count, contradicted_count, source, created_at "
+                f"FROM stock_theses "
+                f"WHERE active=1 AND credibility >= :mc {type_filter} "
+                f"ORDER BY credibility DESC, confirmed_count DESC "
+                f"LIMIT :lim"
+            ),
+            {"mc": min_credibility, "tt": thesis_type, "lim": limit},
+        ).fetchall()
+        return [
+            {
+                "ticker": r[0],
+                "thesis_type": r[1],
+                "thesis": r[2],
+                "credibility": round(r[3], 2),
+                "confirmed_count": r[4],
+                "contradicted_count": r[5],
+                "source": r[6],
+                "added": str(r[7])[:10],
+            }
+            for r in rows
+        ]
+
+
 def get_high_credibility_theses(min_credibility: float = 0.7) -> list:
     with Session() as session:
         rows = session.execute(

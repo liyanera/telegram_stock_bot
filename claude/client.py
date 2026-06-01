@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 import anthropic
 import config
 from claude.tools import TOOLS
@@ -9,11 +10,126 @@ from memory.vector_memory import add_knowledge, search as knowledge_search
 from data.stocks import get_stock_price, get_financials, get_technical_indicators
 from data.news import get_stock_news
 
+logger = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+# Quick-discovery universe: liquid large/mid-cap growth stocks
+_DISCOVERY_UNIVERSE = [
+    "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","CRM","ORCL",
+    "AMD","PLTR","SNOW","DDOG","NET","CRWD","ANET","ZS","MDB","HUBS",
+    "WDAY","NOW","TTD","VEEV","SHOP","UBER","ABNB","HOOD","SOFI","COIN",
+    "LLY","REGN","VRTX","MRVL","ARM","SMCI","GTLB","FTNT","BILL","PAYC",
+]
 
 # Tickers that are common English words — skip these to avoid false positives
 _SKIP_WORDS = {"A", "AT", "BE", "BY", "GO", "HI", "IF", "IN", "IS", "IT",
                "ME", "MY", "NO", "OF", "ON", "OR", "SO", "TO", "UP", "US", "WE"}
+
+
+def _discover_fresh_picks(n: int = 5) -> list[dict]:
+    """
+    Lightweight on-demand stock discovery using Claude Haiku.
+    Fetches fundamentals for a curated universe and asks Claude to find
+    the most undervalued growth picks. Saves results to DB + ChromaDB.
+    """
+    logger.info("No valid recommendations found — running on-demand discovery...")
+    from datetime import datetime
+
+    # Fetch quick snapshot for universe (price + forward P/E + growth)
+    snapshots = []
+    for ticker in _DISCOVERY_UNIVERSE:
+        try:
+            f = get_financials(ticker)
+            p = get_stock_price(ticker)
+            snapshots.append({
+                "ticker": ticker,
+                "company": f.get("company_name", ticker),
+                "sector": f.get("sector"),
+                "price": p.get("price"),
+                "revenue_growth": f.get("revenue_growth") or 0,
+                "gross_margin": f.get("gross_margin") or 0,
+                "forward_pe": f.get("forward_pe"),
+                "free_cash_flow": f.get("free_cash_flow"),
+                "profit_margin": f.get("profit_margin") or 0,
+                "analyst_target": f.get("analyst_target_price"),
+                "recommendation": f.get("recommendation"),
+            })
+        except Exception:
+            continue
+
+    if not snapshots:
+        return []
+
+    # Ask Claude Haiku to pick the best undervalued growth stocks
+    prompt = f"""You are an elite US growth stock analyst. Today is {datetime.utcnow().strftime('%Y-%m-%d')}.
+
+From the data below, identify the {n} most undervalued stocks with the best growth potential.
+Prioritize: high revenue growth, strong margins, reasonable forward P/E, real FCF.
+
+Universe data:
+{json.dumps(snapshots, default=str)}
+
+Return ONLY a JSON array of exactly {n} picks:
+[{{
+  "ticker": "AAPL",
+  "thesis_type": "bull",
+  "thesis": "Concise 1-2 sentence reason why this is undervalued with growth potential",
+  "key_metrics": "e.g. 33% growth, 17x fwd P/E, $25B FCF"
+}}]"""
+
+    try:
+        response = _client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = response.content[0].text.strip()
+        match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if not match:
+            return []
+        picks = json.loads(match.group())
+    except Exception as e:
+        logger.error(f"Discovery Claude call failed: {e}")
+        return []
+
+    # Save new theses to DB + ChromaDB
+    date_str = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    saved = []
+    for pick in picks:
+        ticker = pick.get("ticker", "").upper()
+        thesis = pick.get("thesis", "")
+        thesis_type = pick.get("thesis_type", "bull")
+        if not ticker or not thesis:
+            continue
+        chroma_id = f"thesis-{ticker}-discovery-{date_str}"
+        thesis_id = mysql_memory.save_thesis(
+            ticker=ticker,
+            thesis=thesis,
+            thesis_type=thesis_type,
+            source="on_demand_discovery",
+            chroma_doc_id=chroma_id,
+        )
+        add_knowledge(
+            chroma_id,
+            f"[{thesis_type.upper()} thesis for {ticker}] {thesis}",
+            metadata={"ticker": ticker, "thesis_type": thesis_type,
+                      "credibility": 0.5, "thesis_id": thesis_id,
+                      "type": "stock_thesis"},
+        )
+        saved.append({
+            "ticker": ticker,
+            "thesis_type": thesis_type,
+            "thesis": thesis,
+            "credibility": 0.5,
+            "confirmed_count": 0,
+            "contradicted_count": 0,
+            "source": "on_demand_discovery",
+            "key_metrics": pick.get("key_metrics", ""),
+            "note": "freshly discovered — credibility starts at 0.5, will improve with weekly monitoring",
+        })
+        logger.info(f"New pick discovered and saved: {ticker}")
+
+    return saved
 
 
 def _dispatch_tool(tool_name: str, tool_input: dict) -> str:
@@ -32,6 +148,34 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> str:
                 tool_input["ticker"],
                 tool_input.get("company_name", ""),
             )
+        elif tool_name == "get_recommendations":
+            thesis_type = tool_input.get("thesis_type", "bull")
+            min_cred = float(tool_input.get("min_credibility", 0.0))
+            limit = int(tool_input.get("limit", 10))
+            rows = mysql_memory.get_all_theses_ranked(
+                thesis_type=thesis_type,
+                min_credibility=min_cred,
+                limit=limit,
+            )
+
+            # Trigger fresh discovery if: no results OR all credibility < 0.5
+            needs_discovery = (
+                not rows or
+                all(r.get("credibility", 0) < 0.5 for r in rows)
+            )
+            if needs_discovery:
+                fresh = _discover_fresh_picks(n=5)
+                if fresh:
+                    result = fresh
+                elif rows:
+                    # Fall back to existing low-credibility theses with a warning
+                    for r in rows:
+                        r["note"] = "⚠️ Low credibility — treat as speculative"
+                    result = rows
+                else:
+                    result = [{"message": "Discovery failed — please try again shortly."}]
+            else:
+                result = rows
         elif tool_name == "search_knowledge_base":
             chunks = knowledge_search(tool_input["query"])
             result = [c["text"] for c in chunks] if chunks else ["No relevant knowledge found."]
