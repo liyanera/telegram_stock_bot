@@ -9,6 +9,22 @@ def build_system_prompt(user_id: int, user_query: str) -> str:
     risk = user.risk_tolerance if user else "moderate"
     watchlist_str = ", ".join(watchlist) if watchlist else "none set"
 
+    # Inject high-credibility theses (credibility >= 0.7) as trusted priors
+    trusted_theses = mysql_memory.get_high_credibility_theses(min_credibility=0.7)
+    thesis_section = ""
+    if trusted_theses:
+        lines = []
+        for t in trusted_theses[:8]:  # cap at 8 to avoid prompt bloat
+            cred_pct = int(t["credibility"] * 100)
+            lines.append(
+                f"- [{t['thesis_type'].upper()}] {t['ticker']} "
+                f"(credibility {cred_pct}%): {t['thesis']}"
+            )
+        thesis_section = f"""
+## High-Credibility Prior Theses (battle-tested, prioritize these)
+{chr(10).join(lines)}
+"""
+
     knowledge_section = ""
     if knowledge_chunks:
         chunks_text = "\n\n---\n\n".join(c["text"] for c in knowledge_chunks)
@@ -37,7 +53,7 @@ Silicon Valley operator — you understand both the numbers and the narrative be
 ## User Profile
 - Risk tolerance: {risk}
 - Watchlist: {watchlist_str}
-
+{thesis_section}
 ## Analysis Standards
 - Always pull live data before making any price or fundamental claims
 - Lead with the thesis: bull case first, then risks
