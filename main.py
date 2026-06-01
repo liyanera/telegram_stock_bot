@@ -8,6 +8,8 @@ from bot.commands import (
 from memory.mysql_memory import init_db
 from memory.redis_memory import ping as redis_ping
 from memory.vector_memory import add_knowledge_bulk
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 import config
 from pathlib import Path
 
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _seed_knowledge():
-    """Auto-seed ChromaDB from knowledge/ on every startup (safe on Railway redeploys)."""
+    """Auto-seed ChromaDB from knowledge/ on every startup."""
     knowledge_dir = Path(__file__).parent / "knowledge"
     docs = []
     for filepath in sorted(knowledge_dir.glob("**/*.md")) + sorted(knowledge_dir.glob("**/*.txt")):
@@ -40,6 +42,56 @@ def _seed_knowledge():
         logger.info(f"Knowledge base seeded: {len(docs)} chunks from {knowledge_dir}")
 
 
+def _run_weekly_research():
+    logger.info("Running weekly research...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.weekly_research import main as research_main
+        research_main()
+        logger.info("Weekly research completed.")
+    except Exception as e:
+        logger.error(f"Weekly research failed: {e}")
+
+
+def _run_weekly_monitor():
+    logger.info("Running weekly price monitor...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.weekly_monitor import run_monitor
+        run_monitor()
+        logger.info("Weekly monitor completed.")
+    except Exception as e:
+        logger.error(f"Weekly monitor failed: {e}")
+
+
+def _start_scheduler() -> BackgroundScheduler:
+    scheduler = BackgroundScheduler(timezone="UTC")
+
+    # Weekly research: every Monday 08:00 UTC
+    scheduler.add_job(
+        _run_weekly_research,
+        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        id="weekly_research",
+        name="Weekly top-gainer research + undervalued picks",
+        replace_existing=True,
+    )
+
+    # Weekly monitor: every Monday 09:00 UTC (after research finishes)
+    scheduler.add_job(
+        _run_weekly_monitor,
+        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        id="weekly_monitor",
+        name="Weekly price change + thesis credibility update",
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    logger.info("Scheduler started — weekly research Mon 08:00 UTC, monitor Mon 09:00 UTC")
+    return scheduler
+
+
 def main():
     logger.info("Initializing database...")
     init_db()
@@ -51,6 +103,9 @@ def main():
 
     logger.info("Seeding knowledge base...")
     _seed_knowledge()
+
+    logger.info("Starting weekly scheduler...")
+    scheduler = _start_scheduler()
 
     app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
 
@@ -64,7 +119,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot started. Listening...")
-    app.run_polling(drop_pending_updates=True)
+    try:
+        app.run_polling(drop_pending_updates=True)
+    finally:
+        scheduler.shutdown()
 
 
 if __name__ == "__main__":
