@@ -17,58 +17,13 @@ import pandas as pd
 import anthropic
 import config
 from data.news import get_stock_news
+from data.universe import get_full_universe, screen_by_weekly_performance
 from memory.vector_memory import add_knowledge
-
-# S&P 500 large/mid cap universe (representative sample)
-UNIVERSE = [
-    # Mega cap tech
-    "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","ORCL","CRM",
-    # High-growth tech
-    "AMD","PLTR","SNOW","DDOG","NET","CRWD","MSTR","ANET","FTNT","ZS",
-    "MDB","GTLB","CFLT","TTD","HUBS","BILL","PAYC","VEEV","WDAY","NOW",
-    # Semis
-    "QCOM","TXN","KLAC","LRCX","AMAT","MRVL","ON","SMCI","ARM","INTC",
-    # Consumer/retail growth
-    "SHOP","UBER","ABNB","DASH","LYFT","DUOL","RBLX","ROKU","HOOD",
-    # Biotech/healthcare growth
-    "LLY","NVO","REGN","MRNA","BIIB","VRTX","GILD","INCY","SGEN",
-    # Financials/fintech
-    "V","MA","PYPL","SQ","SOFI","AFRM","COIN",
-    # Other growth
-    "ENPH","FSLR","RIVN","LCID","NIO","XPEV","LI",
-]
 
 
 def get_weekly_performance(tickers: list) -> pd.DataFrame:
-    print(f"Fetching weekly performance for {len(tickers)} stocks...")
-    results = []
-    for ticker in tickers:
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(period="5d")
-            if len(hist) < 2:
-                continue
-            start = hist["Close"].iloc[0]
-            end = hist["Close"].iloc[-1]
-            weekly_return = (end - start) / start * 100
-            vol = hist["Volume"].mean()
-            # Filter: market cap > $5B (mid/large cap)
-            info = t.info
-            mkt_cap = info.get("marketCap", 0) or 0
-            if mkt_cap < 5_000_000_000:
-                continue
-            results.append({
-                "ticker": ticker,
-                "weekly_return_pct": round(weekly_return, 2),
-                "price": round(end, 2),
-                "market_cap_b": round(mkt_cap / 1e9, 1),
-                "avg_volume": int(vol),
-                "company": info.get("shortName", ticker),
-            })
-        except Exception as e:
-            pass
-    df = pd.DataFrame(results)
-    return df.sort_values("weekly_return_pct", ascending=False)
+    """Use batch screening for speed across full universe."""
+    return screen_by_weekly_performance(tickers, top_n=60, min_market_cap_b=2.0)
 
 
 def get_stock_snapshot(ticker: str) -> dict:
@@ -186,8 +141,10 @@ def main():
     print(f"Weekly Growth Research — {date_str}")
     print(f"{'='*60}\n")
 
-    # Step 1: Get top 10 weekly gainers
-    perf_df = get_weekly_performance(UNIVERSE)
+    # Step 1: Get top 10 weekly gainers from full market universe
+    universe = get_full_universe()
+    print(f"Universe size: {len(universe)} tickers")
+    perf_df = get_weekly_performance(universe)
     top10 = perf_df.head(10)
     print("\nTop 10 Weekly Gainers:")
     print(top10[["ticker", "company", "weekly_return_pct", "market_cap_b"]].to_string(index=False))

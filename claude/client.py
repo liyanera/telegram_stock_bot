@@ -9,17 +9,10 @@ from memory import redis_memory, mysql_memory
 from memory.vector_memory import add_knowledge, search as knowledge_search
 from data.stocks import get_stock_price, get_financials, get_technical_indicators
 from data.news import get_stock_news
+from data.universe import get_full_universe, screen_by_weekly_performance
 
 logger = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
-# Quick-discovery universe: liquid large/mid-cap growth stocks
-_DISCOVERY_UNIVERSE = [
-    "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","CRM","ORCL",
-    "AMD","PLTR","SNOW","DDOG","NET","CRWD","ANET","ZS","MDB","HUBS",
-    "WDAY","NOW","TTD","VEEV","SHOP","UBER","ABNB","HOOD","SOFI","COIN",
-    "LLY","REGN","VRTX","MRVL","ARM","SMCI","GTLB","FTNT","BILL","PAYC",
-]
 
 # Tickers that are common English words — skip these to avoid false positives
 _SKIP_WORDS = {"A", "AT", "BE", "BY", "GO", "HI", "IF", "IN", "IS", "IT",
@@ -28,16 +21,29 @@ _SKIP_WORDS = {"A", "AT", "BE", "BY", "GO", "HI", "IF", "IN", "IS", "IT",
 
 def _discover_fresh_picks(n: int = 5) -> list[dict]:
     """
-    Lightweight on-demand stock discovery using Claude Haiku.
-    Fetches fundamentals for a curated universe and asks Claude to find
-    the most undervalued growth picks. Saves results to DB + ChromaDB.
+    On-demand discovery across the full S&P 500 + Nasdaq 100 universe.
+    Uses batch price screening to pre-filter, then deep-dives top candidates.
     """
-    logger.info("No valid recommendations found — running on-demand discovery...")
+    logger.info("Running on-demand discovery across full market universe...")
     from datetime import datetime
 
-    # Fetch quick snapshot for universe (price + forward P/E + growth)
+    # Step 1: Get full universe (S&P 500 + Nasdaq 100 + growth extras)
+    universe = get_full_universe()
+    logger.info(f"Universe size: {len(universe)} tickers")
+
+    # Step 2: Batch screen by weekly performance — fast single yfinance call
+    # Take top 60 movers as candidates for deep analysis
+    screened = screen_by_weekly_performance(universe, top_n=60, min_market_cap_b=2.0)
+    if screened.empty:
+        logger.warning("Batch screen returned no results")
+        return []
+
+    candidates = screened["ticker"].tolist()
+    logger.info(f"Screened down to {len(candidates)} candidates for deep analysis")
+
+    # Step 3: Fetch detailed fundamentals for top candidates
     snapshots = []
-    for ticker in _DISCOVERY_UNIVERSE:
+    for ticker in candidates:
         try:
             f = get_financials(ticker)
             p = get_stock_price(ticker)
@@ -46,6 +52,9 @@ def _discover_fresh_picks(n: int = 5) -> list[dict]:
                 "company": f.get("company_name", ticker),
                 "sector": f.get("sector"),
                 "price": p.get("price"),
+                "weekly_return_pct": float(
+                    screened.loc[screened["ticker"] == ticker, "weekly_return_pct"].values[0]
+                ) if ticker in screened["ticker"].values else 0,
                 "revenue_growth": f.get("revenue_growth") or 0,
                 "gross_margin": f.get("gross_margin") or 0,
                 "forward_pe": f.get("forward_pe"),
@@ -59,6 +68,8 @@ def _discover_fresh_picks(n: int = 5) -> list[dict]:
 
     if not snapshots:
         return []
+
+    logger.info(f"Deep analysis data ready for {len(snapshots)} stocks")
 
     # Ask Claude Haiku to pick the best undervalued growth stocks
     prompt = f"""You are an elite US growth stock analyst. Today is {datetime.utcnow().strftime('%Y-%m-%d')}.
