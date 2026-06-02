@@ -188,6 +188,55 @@ Return ONLY a JSON array of exactly {n} picks:
     return saved
 
 
+# ── Casual chat detection ────────────────────────────────────────────────────
+
+_CASUAL_PATTERNS = {
+    # English
+    "hi", "hello", "hey", "thanks", "thank you", "thx", "ok", "okay", "sure",
+    "got it", "good", "great", "nice", "cool", "bye", "goodbye", "see you",
+    "lol", "haha", "yes", "no", "yep", "nope", "alright", "perfect",
+    # Chinese
+    "你好", "早上好", "晚上好", "嗯", "好的", "谢谢", "谢了", "感谢", "明白",
+    "知道了", "好", "棒", "厉害", "牛", "哦", "哈哈", "再见", "拜拜",
+    "好的好的", "收到", "没问题", "可以", "行", "不错",
+}
+
+_STOCK_KEYWORDS = {
+    # Must contain at least one of these to be considered stock-related
+    "$", "%", "stock", "share", "price", "market", "invest", "trade", "buy",
+    "sell", "hold", "bull", "bear", "earnings", "revenue", "profit", "loss",
+    "portfolio", "ticker", "NYSE", "NASDAQ", "S&P", "ETF", "IPO", "dividend",
+    "analyst", "target", "forecast", "sector", "growth", "valuation",
+    "股", "票", "涨", "跌", "买", "卖", "持仓", "仓位", "市值", "估值",
+    "收入", "利润", "增长", "分析", "推荐", "目标价", "行业",
+}
+
+
+def _is_casual(user_message: str, assistant_response: str) -> bool:
+    """
+    Returns True if this exchange is casual chat / small talk
+    that should NOT be saved to memory.
+    """
+    msg_lower = user_message.lower().strip()
+    resp_lower = assistant_response.lower()
+
+    # Short message with no stock keywords → casual
+    if len(user_message) <= 30:
+        if msg_lower in _CASUAL_PATTERNS:
+            return True
+        if not any(kw in msg_lower for kw in _STOCK_KEYWORDS):
+            # Also no ticker-like pattern
+            tickers = {m for m in _TICKER_PATTERN.findall(user_message) if m not in _SKIP_WORDS}
+            if not tickers:
+                return True
+
+    # Short response with no analysis content → casual
+    if len(assistant_response) < 150 and not any(kw in resp_lower for kw in {"p/e", "rsi", "revenue", "margin", "ticker", "%"}):
+        return True
+
+    return False
+
+
 # ── Post-response extraction (Haiku) ─────────────────────────────────────────
 
 def _extract_analyses(user_message: str, assistant_response: str) -> list:
@@ -328,7 +377,12 @@ def chat(user_id: int, user_message: str) -> str:
                 )
             break
 
-    # Persist
+    # Skip persistence for casual chat / small talk
+    if _is_casual(user_message, final_text):
+        logger.debug(f"Skipping memory persistence for casual message from user {user_id}")
+        return final_text
+
+    # Persist substantive exchanges only
     redis_memory.append_turn(user_id, "user", user_message)
     redis_memory.append_turn(user_id, "assistant", final_text)
     mysql_memory.save_conversation_turn(user_id, "user", user_message)
