@@ -66,8 +66,29 @@ def _run_weekly_monitor():
         logger.error(f"Weekly monitor failed: {e}")
 
 
+def _run_daily_premarket():
+    logger.info("Running daily pre-market news tracker...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.daily_premarket import run_daily_premarket
+        run_daily_premarket()
+        logger.info("Pre-market tracker completed.")
+    except Exception as e:
+        logger.error(f"Pre-market tracker failed: {e}")
+
+
 def _start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
+
+    # Daily pre-market: Mon-Fri 13:00 UTC (9:00 AM ET, 30 min before open)
+    scheduler.add_job(
+        _run_daily_premarket,
+        CronTrigger(day_of_week="mon-fri", hour=13, minute=0),
+        id="daily_premarket",
+        name="Daily pre-market watchlist news + macro briefing",
+        replace_existing=True,
+    )
 
     # Weekly research: every Monday 08:00 UTC
     scheduler.add_job(
@@ -88,7 +109,12 @@ def _start_scheduler() -> BackgroundScheduler:
     )
 
     scheduler.start()
-    logger.info("Scheduler started — weekly research Mon 08:00 UTC, monitor Mon 09:00 UTC")
+    logger.info(
+        "Scheduler started — "
+        "pre-market Mon-Fri 13:00 UTC | "
+        "weekly research Mon 08:00 UTC | "
+        "monitor Mon 09:00 UTC"
+    )
     return scheduler
 
 
