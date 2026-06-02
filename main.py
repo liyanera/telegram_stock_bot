@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, fil
 from bot.handlers import handle_message
 from bot.commands import (
     cmd_start, cmd_help, cmd_watchlist,
-    cmd_add, cmd_remove, cmd_risk, cmd_clear,
+    cmd_add, cmd_remove, cmd_risk, cmd_clear, cmd_portfolio,
 )
 from memory.mysql_memory import init_db
 from memory.redis_memory import ping as redis_ping
@@ -78,6 +78,39 @@ def _run_daily_premarket():
         logger.error(f"Pre-market tracker failed: {e}")
 
 
+def _run_trading_preopen():
+    logger.info("Running pre-open trading agent...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.trading_preopen import run_preopen
+        run_preopen()
+    except Exception as e:
+        logger.error(f"Pre-open trading failed: {e}")
+
+
+def _run_trading_preclose():
+    logger.info("Running pre-close trading agent...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.trading_preclose import run_preclose
+        run_preclose()
+    except Exception as e:
+        logger.error(f"Pre-close trading failed: {e}")
+
+
+def _run_trading_eod():
+    logger.info("Running EOD PNL calculation...")
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from scripts.trading_eod import run_eod
+        run_eod()
+    except Exception as e:
+        logger.error(f"EOD PNL failed: {e}")
+
+
 def _start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
 
@@ -108,10 +141,40 @@ def _start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
+    # Paper trading: pre-open Mon-Fri 13:20 UTC (9:20 AM ET)
+    scheduler.add_job(
+        _run_trading_preopen,
+        CronTrigger(day_of_week="mon-fri", hour=13, minute=20),
+        id="trading_preopen",
+        name="Paper trading pre-open rebalancing",
+        replace_existing=True,
+    )
+
+    # Paper trading: pre-close Mon-Fri 19:30 UTC (3:30 PM ET)
+    scheduler.add_job(
+        _run_trading_preclose,
+        CronTrigger(day_of_week="mon-fri", hour=19, minute=30),
+        id="trading_preclose",
+        name="Paper trading pre-close rebalancing",
+        replace_existing=True,
+    )
+
+    # Paper trading: EOD PNL Mon-Fri 21:00 UTC (5:00 PM ET)
+    scheduler.add_job(
+        _run_trading_eod,
+        CronTrigger(day_of_week="mon-fri", hour=21, minute=0),
+        id="trading_eod",
+        name="Paper trading EOD PNL calculation",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started — "
         "pre-market Mon-Fri 13:00 UTC | "
+        "trading pre-open 13:20 UTC | "
+        "trading pre-close 19:30 UTC | "
+        "trading EOD 21:00 UTC | "
         "weekly research Mon 08:00 UTC | "
         "monitor Mon 09:00 UTC"
     )
@@ -142,6 +205,7 @@ def main():
     app.add_handler(CommandHandler("remove", cmd_remove))
     app.add_handler(CommandHandler("risk", cmd_risk))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot started. Listening...")
