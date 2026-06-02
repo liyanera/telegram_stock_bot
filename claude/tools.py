@@ -67,6 +67,39 @@ TOOLS = [
         },
     },
     {
+        "name": "get_analyst_ratings",
+        "description": (
+            "Get Wall Street analyst consensus, recent rating upgrades/downgrades, "
+            "price targets (mean/high/low), upside to consensus target, institutional "
+            "and insider ownership, short interest, and forward EPS/revenue estimates. "
+            "Use when asked about analyst views, price targets, institutional sentiment, "
+            "or when doing a comprehensive stock analysis."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Stock ticker symbol"}
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_enriched_news",
+        "description": (
+            "Fetch last 3 days of news for a stock, analyze sentiment (bullish/bearish/neutral), "
+            "identify key themes and catalysts/risks, and return an AI-synthesized summary. "
+            "Use instead of get_stock_news for deeper news analysis or when sentiment context matters."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Stock ticker symbol"},
+                "company_name": {"type": "string", "description": "Company name for better search"},
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
         "name": "get_recommendations",
         "description": (
             "Get stock recommendations from the internal thesis database, ranked by credibility score. "

@@ -7,8 +7,9 @@ from claude.tools import TOOLS
 from claude.prompts import build_system_prompt, build_static_persona
 from memory import redis_memory, mysql_memory
 from memory.vector_memory import add_knowledge, search as knowledge_search
-from data.stocks import get_stock_price, get_financials, get_technical_indicators
+from data.stocks import get_stock_price, get_financials, get_technical_indicators, get_analyst_ratings
 from data.news import get_stock_news
+from data.news_enricher import enrich_and_store_news
 from data.universe import get_full_universe, screen_by_weekly_performance
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,15 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> str:
 
         elif tool_name == "get_stock_news":
             result = get_stock_news(
+                tool_input["ticker"],
+                tool_input.get("company_name", ""),
+            )
+
+        elif tool_name == "get_analyst_ratings":
+            result = get_analyst_ratings(tool_input["ticker"])
+
+        elif tool_name == "get_enriched_news":
+            result = enrich_and_store_news(
                 tool_input["ticker"],
                 tool_input.get("company_name", ""),
             )

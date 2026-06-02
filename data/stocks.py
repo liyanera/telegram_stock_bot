@@ -108,3 +108,87 @@ def get_price_history(ticker: str, period: str = "1mo") -> dict:
             "volume": int(row["Volume"]),
         })
     return {"ticker": ticker.upper(), "history": records}
+
+
+def get_analyst_ratings(ticker: str) -> dict:
+    """
+    Get analyst consensus, recent rating changes, price targets,
+    and institutional ownership.
+    """
+    t = yf.Ticker(ticker)
+    info = t.info
+
+    # Recent analyst upgrades/downgrades
+    rating_changes = []
+    try:
+        upgrades = t.upgrades_downgrades
+        if upgrades is not None and not upgrades.empty:
+            recent = upgrades.head(10).reset_index()
+            for _, row in recent.iterrows():
+                rating_changes.append({
+                    "date": str(row.get("GradeDate", ""))[:10],
+                    "firm": row.get("Firm", ""),
+                    "from": row.get("FromGrade", ""),
+                    "to": row.get("ToGrade", ""),
+                    "action": row.get("Action", ""),
+                })
+    except Exception:
+        pass
+
+    # EPS estimates
+    eps_estimates = []
+    try:
+        earnings = t.earnings_estimate
+        if earnings is not None and not earnings.empty:
+            for period, row in earnings.iterrows():
+                eps_estimates.append({
+                    "period": str(period),
+                    "avg_estimate": row.get("avg", None),
+                    "low": row.get("low", None),
+                    "high": row.get("high", None),
+                    "num_analysts": row.get("numberOfAnalysts", None),
+                })
+    except Exception:
+        pass
+
+    # Revenue estimates
+    rev_estimates = []
+    try:
+        rev = t.revenue_estimate
+        if rev is not None and not rev.empty:
+            for period, row in rev.iterrows():
+                rev_estimates.append({
+                    "period": str(period),
+                    "avg_estimate": row.get("avg", None),
+                    "low": row.get("low", None),
+                    "high": row.get("high", None),
+                    "growth": row.get("growth", None),
+                })
+    except Exception:
+        pass
+
+    return {
+        "ticker": ticker.upper(),
+        "consensus": info.get("recommendationKey", "N/A"),
+        "num_analysts": info.get("numberOfAnalystOpinions"),
+        "target_mean": info.get("targetMeanPrice"),
+        "target_high": info.get("targetHighPrice"),
+        "target_low": info.get("targetLowPrice"),
+        "current_price": info.get("currentPrice"),
+        "upside_pct": round(
+            (info.get("targetMeanPrice", 0) - info.get("currentPrice", 0))
+            / info.get("currentPrice", 1) * 100, 1
+        ) if info.get("currentPrice") and info.get("targetMeanPrice") else None,
+        "institutional_ownership_pct": round(
+            (info.get("heldPercentInstitutions") or 0) * 100, 1
+        ),
+        "insider_ownership_pct": round(
+            (info.get("heldPercentInsiders") or 0) * 100, 1
+        ),
+        "short_float_pct": round(
+            (info.get("shortPercentOfFloat") or 0) * 100, 1
+        ),
+        "recent_rating_changes": rating_changes[:8],
+        "eps_estimates": eps_estimates[:4],
+        "revenue_estimates": rev_estimates[:4],
+    }
