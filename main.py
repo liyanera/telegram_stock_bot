@@ -215,8 +215,12 @@ def main():
     logger.info("Syncing thesis credibility from MySQL...")
     _sync_credibility_from_mysql()
 
-    logger.info("Starting weekly scheduler...")
-    scheduler = _start_scheduler()
+    if config.DISABLE_SCHEDULER:
+        logger.info("Scheduler disabled via DISABLE_SCHEDULER env var.")
+        scheduler = None
+    else:
+        logger.info("Starting weekly scheduler...")
+        scheduler = _start_scheduler()
 
     app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
 
@@ -239,7 +243,8 @@ def main():
     try:
         app.run_polling(drop_pending_updates=True)
     finally:
-        scheduler.shutdown()
+        if scheduler:
+            scheduler.shutdown()
 
 
 if __name__ == "__main__":
