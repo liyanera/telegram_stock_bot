@@ -1,10 +1,52 @@
 import yfinance as yf
 import pandas as pd
+from datetime import datetime
+from pathlib import Path
 try:
     import ta as ta_lib
     HAS_TA = True
 except ImportError:
     HAS_TA = False
+
+
+def _quarter_label(unix_ts) -> Optional[str]:
+    """Convert a Unix timestamp to 'YYYYQn' string."""
+    if not unix_ts:
+        return None
+    dt = datetime.utcfromtimestamp(unix_ts)
+    q = (dt.month - 1) // 3 + 1
+    return f"{dt.year}Q{q}"
+
+
+def _save_earnings_knowledge(ticker: str, quarter: str, data: dict):
+    """Append one earnings entry to knowledge/earnings/TICKER.md."""
+    kb_dir = Path(__file__).parent.parent / "knowledge" / "earnings"
+    kb_dir.mkdir(parents=True, exist_ok=True)
+    path = kb_dir / f"{ticker}.md"
+    rev = data.get("revenue")
+    fcf = data.get("free_cash_flow")
+    lines = [f"\n## {quarter} — {datetime.utcnow().strftime('%Y-%m-%d')}"]
+    if rev:
+        lines.append(f"- Revenue: ${round(rev/1e9, 2)}B")
+    growth = data.get("revenue_growth")
+    if growth:
+        lines.append(f"- Revenue growth YoY: {round(growth*100, 1)}%")
+    if data.get("eps"):
+        lines.append(f"- EPS (trailing): {data['eps']}")
+    if data.get("gross_margin"):
+        lines.append(f"- Gross margin: {round(data['gross_margin']*100, 1)}%")
+    if data.get("profit_margin"):
+        lines.append(f"- Profit margin: {round(data['profit_margin']*100, 1)}%")
+    if fcf:
+        lines.append(f"- FCF: ${round(fcf/1e9, 2)}B")
+    if data.get("analyst_target_price"):
+        lines.append(f"- Analyst target: ${data['analyst_target_price']} | {data.get('recommendation','')}")
+    with open(path, "a") as f:
+        if not path.exists() or path.stat().st_size == 0:
+            f.write(f"# Earnings History — {ticker}\n")
+        f.write("\n".join(lines) + "\n")
+
+
 
 
 def get_stock_price(ticker: str) -> dict:
@@ -33,7 +75,7 @@ def get_stock_price(ticker: str) -> dict:
 def get_financials(ticker: str) -> dict:
     t = yf.Ticker(ticker)
     info = t.info
-    return {
+    result = {
         "ticker": ticker.upper(),
         "company_name": info.get("longName"),
         "sector": info.get("sector"),
@@ -42,6 +84,7 @@ def get_financials(ticker: str) -> dict:
         "forward_pe": info.get("forwardPE"),
         "eps": info.get("trailingEps"),
         "revenue": info.get("totalRevenue"),
+        "revenue_growth": info.get("revenueGrowth"),
         "gross_margin": info.get("grossMargins"),
         "profit_margin": info.get("profitMargins"),
         "debt_to_equity": info.get("debtToEquity"),
@@ -52,6 +95,24 @@ def get_financials(ticker: str) -> dict:
         "analyst_target_price": info.get("targetMeanPrice"),
         "recommendation": info.get("recommendationKey"),
     }
+    # Auto-save earnings snapshot when a new quarter is detected
+    _maybe_save_earnings(ticker.upper(), info, result)
+    return result
+
+
+def _maybe_save_earnings(ticker: str, info: dict, data: dict):
+    """Save earnings snapshot if this quarter hasn't been recorded yet."""
+    quarter = _quarter_label(info.get("mostRecentQuarter"))
+    if not quarter:
+        return
+    try:
+        from memory.mysql_memory import get_last_earnings_quarter, save_earnings_snapshot
+        if get_last_earnings_quarter(ticker) == quarter:
+            return  # already saved
+        save_earnings_snapshot(ticker, quarter, data)
+        _save_earnings_knowledge(ticker, quarter, data)
+    except Exception:
+        pass  # never block the main response
 
 
 def get_technical_indicators(ticker: str, period: str = "3mo") -> dict:

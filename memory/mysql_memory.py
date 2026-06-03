@@ -331,3 +331,137 @@ def get_last_snapshot(ticker: str) -> Optional[dict]:
             {"t": ticker},
         ).first()
         return {"price": row[0], "snapped_at": row[1]} if row else None
+
+
+# ── Earnings Memory ───────────────────────────────────────────────────────────
+
+class EarningsMemory(Base):
+    """Per-quarter earnings snapshots for pattern recognition."""
+    __tablename__ = "stock_earnings_memory"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), index=True)
+    quarter = Column(String(10))               # e.g. "2026Q1"
+    report_date = Column(String(10))           # "YYYY-MM-DD"
+    eps_actual = Column(Float, nullable=True)
+    eps_estimate = Column(Float, nullable=True)
+    eps_surprise_pct = Column(Float, nullable=True)
+    revenue_b = Column(Float, nullable=True)   # in billions
+    revenue_growth_yoy = Column(Float, nullable=True)
+    gross_margin = Column(Float, nullable=True)
+    profit_margin = Column(Float, nullable=True)
+    free_cash_flow_b = Column(Float, nullable=True)
+    analyst_target = Column(Float, nullable=True)
+    recommendation = Column(String(20), nullable=True)
+    saved_at = Column(DateTime, default=datetime.utcnow)
+
+
+def get_last_earnings_quarter(ticker: str) -> Optional[str]:
+    ticker = ticker.upper()
+    with Session() as session:
+        row = session.execute(
+            text("SELECT quarter FROM stock_earnings_memory "
+                 "WHERE ticker=:t ORDER BY saved_at DESC LIMIT 1"),
+            {"t": ticker},
+        ).first()
+    return row[0] if row else None
+
+
+def save_earnings_snapshot(ticker: str, quarter: str, data: dict) -> int:
+    ticker = ticker.upper()
+    rev = data.get("revenue")
+    fcf = data.get("free_cash_flow")
+    with Session() as session:
+        row = session.execute(
+            text("SELECT id FROM stock_earnings_memory WHERE ticker=:t AND quarter=:q"),
+            {"t": ticker, "q": quarter},
+        ).first()
+        if row:
+            return row[0]  # already saved this quarter
+        entry = EarningsMemory(
+            ticker=ticker,
+            quarter=quarter,
+            report_date=datetime.utcnow().strftime("%Y-%m-%d"),
+            eps_actual=data.get("eps"),
+            eps_estimate=data.get("eps_estimate"),
+            eps_surprise_pct=data.get("eps_surprise_pct"),
+            revenue_b=round(rev / 1e9, 3) if rev else None,
+            revenue_growth_yoy=data.get("revenue_growth"),
+            gross_margin=data.get("gross_margin"),
+            profit_margin=data.get("profit_margin"),
+            free_cash_flow_b=round(fcf / 1e9, 3) if fcf else None,
+            analyst_target=data.get("analyst_target_price"),
+            recommendation=data.get("recommendation"),
+        )
+        session.add(entry)
+        session.commit()
+        return entry.id
+
+
+def get_earnings_history(ticker: str, limit: int = 8) -> list:
+    ticker = ticker.upper()
+    with Session() as session:
+        rows = session.execute(
+            text("SELECT quarter, report_date, eps_actual, eps_estimate, eps_surprise_pct, "
+                 "revenue_b, revenue_growth_yoy, gross_margin, profit_margin, "
+                 "free_cash_flow_b, analyst_target, recommendation "
+                 "FROM stock_earnings_memory WHERE ticker=:t "
+                 "ORDER BY quarter DESC LIMIT :lim"),
+            {"t": ticker, "lim": limit},
+        ).fetchall()
+    return [
+        {
+            "quarter": r[0], "report_date": r[1],
+            "eps_actual": r[2], "eps_estimate": r[3], "eps_surprise_pct": r[4],
+            "revenue_b": r[5], "revenue_growth_yoy": r[6],
+            "gross_margin": r[7], "profit_margin": r[8],
+            "free_cash_flow_b": r[9], "analyst_target": r[10], "recommendation": r[11],
+        }
+        for r in rows
+    ]
+
+
+# ── News Themes ───────────────────────────────────────────────────────────────
+
+class NewsTheme(Base):
+    """Rolling news theme accumulation per ticker."""
+    __tablename__ = "stock_news_themes"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), index=True)
+    date = Column(String(10))
+    sentiment = Column(String(20))
+    score = Column(Float)
+    themes = Column(Text)     # JSON list
+    catalysts = Column(Text)  # JSON list
+    saved_at = Column(DateTime, default=datetime.utcnow)
+
+
+def save_news_theme(ticker: str, date: str, sentiment: str, score: float,
+                    themes: list, catalysts: list):
+    import json
+    ticker = ticker.upper()
+    with Session() as session:
+        session.add(NewsTheme(
+            ticker=ticker, date=date, sentiment=sentiment, score=score,
+            themes=json.dumps(themes), catalysts=json.dumps(catalysts),
+        ))
+        session.commit()
+
+
+def get_news_theme_history(ticker: str, limit: int = 12) -> list:
+    import json
+    ticker = ticker.upper()
+    with Session() as session:
+        rows = session.execute(
+            text("SELECT date, sentiment, score, themes, catalysts "
+                 "FROM stock_news_themes WHERE ticker=:t "
+                 "ORDER BY date DESC LIMIT :lim"),
+            {"t": ticker, "lim": limit},
+        ).fetchall()
+    return [
+        {
+            "date": r[0], "sentiment": r[1], "score": r[2],
+            "themes": json.loads(r[3] or "[]"),
+            "catalysts": json.loads(r[4] or "[]"),
+        }
+        for r in rows
+    ]

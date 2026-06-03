@@ -3,10 +3,12 @@ News enrichment pipeline:
 1. Fetch last 3 days of news for a ticker
 2. Use Claude Haiku to summarize + sentiment score
 3. Store enriched summary in ChromaDB for future RAG
+4. Persist themes to MySQL + knowledge/news_themes/TICKER.md
 """
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 import anthropic
 import config
 from data.news import get_stock_news
@@ -94,4 +96,43 @@ Return ONLY valid JSON:
         )
         logger.info(f"News enriched and stored for {ticker}: {sentiment_label} (score={enriched['score']:.2f})")
 
+    # Persist themes to MySQL + knowledge file
+    if enriched["key_themes"] or enriched["catalysts"]:
+        try:
+            from memory.mysql_memory import save_news_theme
+            save_news_theme(
+                ticker=ticker,
+                date=enriched["date"],
+                sentiment=enriched["sentiment"],
+                score=enriched["score"],
+                themes=enriched["key_themes"],
+                catalysts=enriched["catalysts"],
+            )
+            _save_news_theme_knowledge(ticker, enriched)
+        except Exception as e:
+            logger.debug(f"News theme persist failed (non-fatal): {e}")
+
     return enriched
+
+
+def _save_news_theme_knowledge(ticker: str, enriched: dict):
+    """Append this date's news theme to knowledge/news_themes/TICKER.md."""
+    kb_dir = Path(__file__).parent.parent / "knowledge" / "news_themes"
+    kb_dir.mkdir(parents=True, exist_ok=True)
+    path = kb_dir / f"{ticker}.md"
+    sentiment_icon = {"bullish": "📈", "bearish": "📉", "neutral": "➡️"}.get(
+        enriched["sentiment"], "➡️"
+    )
+    lines = [
+        f"\n## {enriched['date']} {sentiment_icon} {enriched['sentiment'].upper()} "
+        f"(score: {enriched['score']:+.2f})",
+        f"**Summary**: {enriched['summary']}",
+    ]
+    if enriched["key_themes"]:
+        lines.append(f"**Themes**: {', '.join(enriched['key_themes'])}")
+    if enriched["catalysts"]:
+        lines.append(f"**Catalysts/Risks**: {'; '.join(enriched['catalysts'])}")
+    with open(path, "a") as f:
+        if not path.exists() or path.stat().st_size == 0:
+            f.write(f"# News Themes — {ticker}\n")
+        f.write("\n".join(lines) + "\n")

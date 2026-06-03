@@ -86,6 +86,16 @@ def _dispatch_tool(tool_name: str, tool_input: dict) -> str:
             else:
                 result = rows
 
+        elif tool_name == "get_earnings_history":
+            result = mysql_memory.get_earnings_history(tool_input["ticker"])
+            if not result:
+                result = {"message": "No earnings history recorded yet. Will accumulate as get_financials is called."}
+
+        elif tool_name == "get_news_theme_history":
+            result = mysql_memory.get_news_theme_history(tool_input["ticker"])
+            if not result:
+                result = {"message": "No news theme history yet. Will accumulate as get_enriched_news is called."}
+
         elif tool_name == "search_knowledge_base":
             chunks = knowledge_search(tool_input["query"])
             result = [c["text"] for c in chunks] if chunks else ["No relevant knowledge found."]

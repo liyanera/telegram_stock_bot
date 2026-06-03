@@ -129,6 +129,37 @@ TOOLS = [
         },
     },
     {
+        "name": "get_earnings_history",
+        "description": (
+            "Get the historical earnings snapshots for a stock — quarterly revenue, EPS, "
+            "margins, FCF, and analyst targets across multiple quarters. Use this when asked "
+            "about earnings trends, beat/miss patterns, margin trajectory, or fundamental "
+            "progress over time. Returns up to 8 quarters of data."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Stock ticker symbol"},
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_news_theme_history",
+        "description": (
+            "Get the accumulated news sentiment and theme history for a stock over recent weeks. "
+            "Shows recurring catalysts, persistent risks, and sentiment trend. Use when asked "
+            "about news patterns, recurring themes, or how sentiment has evolved over time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Stock ticker symbol"},
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
         "name": "search_knowledge_base",
         "description": (
             "Search the internal knowledge base for analysis frameworks, investment methodologies, "

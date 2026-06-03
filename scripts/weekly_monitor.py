@@ -80,6 +80,30 @@ Return ONLY valid JSON array:
         return []
 
 
+def _save_validation_knowledge(ticker: str, date_str: str, change_pct: float,
+                               assessments: list, theses: list):
+    """Append thesis validation results to knowledge/thesis_validation/TICKER.md."""
+    from pathlib import Path
+    kb_dir = Path(__file__).parent.parent / "knowledge" / "thesis_validation"
+    kb_dir.mkdir(parents=True, exist_ok=True)
+    path = kb_dir / f"{ticker}.md"
+    direction = "▲" if change_pct > 0 else "▼"
+    lines = [f"\n## {date_str} — {ticker} {direction}{abs(change_pct):.1f}%"]
+    thesis_map = {t["id"]: t for t in theses}
+    for a in assessments:
+        tid = a.get("thesis_id")
+        thesis_row = thesis_map.get(tid, {})
+        status = "✅ CONFIRMED" if a["consistent"] else "❌ CONTRADICTED"
+        lines.append(f"- Thesis #{tid} [{thesis_row.get('thesis_type','?').upper()}] {status}")
+        lines.append(f"  Thesis: \"{thesis_row.get('thesis', '')}\"")
+        lines.append(f"  Reason: {a.get('reason', '')}")
+        lines.append(f"  Credibility after: {thesis_row.get('credibility', '?')}")
+    with open(path, "a") as f:
+        if not path.exists() or path.stat().st_size == 0:
+            f.write(f"# Thesis Validation History — {ticker}\n")
+        f.write("\n".join(lines) + "\n")
+
+
 def _save_alerts_to_file(alerts_log: list, date_str: str):
     """Write price alert assessments to knowledge/ and git commit."""
     if not alerts_log:
@@ -191,6 +215,9 @@ def run_monitor():
                         for a in assessments
                     ],
                 })
+
+                # Persist thesis validation audit trail to knowledge file
+                _save_validation_knowledge(ticker, date_str, change_pct, assessments, theses)
 
                 # Keep ChromaDB warm for current session
                 assessment_text = (
