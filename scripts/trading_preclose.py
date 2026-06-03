@@ -82,6 +82,18 @@ def run_preclose():
     else:
         logger.info("No trades — holding current positions.")
 
+    # Notify Telegram group
+    import config
+    if config.TRADING_GROUP_CHAT_ID:
+        from trading.notifier import format_preclose_plan, send_to_group
+        pf = get_or_create_portfolio("main")
+        new_gmv = calculate_gmv(get_positions("main"), price_map)
+        msg = format_preclose_plan(
+            plan, result["executed"] if plan.get("trades") else [],
+            trade_date, pf["cash"] + new_gmv, pf["cash"], new_gmv
+        )
+        send_to_group(config.TRADING_GROUP_CHAT_ID, msg)
+
     logger.info(f"Pre-close rebalancing complete.\n{'='*60}\n")
 
 

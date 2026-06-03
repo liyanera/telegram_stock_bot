@@ -108,10 +108,18 @@ Positions:
 - Daily turnover used: ${today_turnover:,.0f} | limit: ${gmv * MAX_DAILY_TURNOVER_PCT:,.0f}
 - Weekly turnover used: ${weekly_turnover:,.0f} | limit: ${gmv * MAX_WEEKLY_TURNOVER_PCT:,.0f}
 
+## Strategy Rules (MANDATORY)
+- FULLY INVESTED at all times — target 0% cash, 100% in stocks
+- Deploy ALL available cash into positions every session
+- If cash > $5,000 after trades, you have not deployed enough — add more positions or increase sizes
+- Distribute across up to {MAX_POSITIONS} names; allocate remaining cash proportionally to highest-conviction picks
+- No cash reserve under any circumstances — macro uncertainty is NOT a reason to hold cash
+
 ## Task
-Generate a rebalancing plan. Be selective — only trade when conviction is high.
+Generate a rebalancing plan to deploy ALL capital into stocks.
 Consider: sector concentration, momentum, news catalysts, macro environment.
 Prefer high-quality growth stocks with strong fundamentals and positive momentum.
+If no position changes are needed, still deploy any remaining cash into existing positions.
 
 Return ONLY valid JSON:
 {{

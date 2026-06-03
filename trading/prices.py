@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
-def get_prev_close(ticker: str) -> float | None:
+def get_prev_close(ticker: str):
     """Previous trading day's closing price."""
     try:
         hist = yf.Ticker(ticker).history(period="5d")
@@ -17,7 +17,7 @@ def get_prev_close(ticker: str) -> float | None:
         return None
 
 
-def get_realtime_price(ticker: str) -> float | None:
+def get_realtime_price(ticker: str):
     """Current market price (best available)."""
     try:
         t = yf.Ticker(ticker)
@@ -29,7 +29,7 @@ def get_realtime_price(ticker: str) -> float | None:
         return None
 
 
-def get_vwap(ticker: str, period: str = "1d") -> float | None:
+def get_vwap(ticker: str, period: str = "1d") :
     """Volume-weighted average price for the day."""
     try:
         hist = yf.Ticker(ticker).history(period=period, interval="1m")
@@ -42,7 +42,7 @@ def get_vwap(ticker: str, period: str = "1d") -> float | None:
         return None
 
 
-def get_open_price(ticker: str) -> float | None:
+def get_open_price(ticker: str) :
     """Today's opening price."""
     try:
         hist = yf.Ticker(ticker).history(period="1d")
@@ -53,7 +53,7 @@ def get_open_price(ticker: str) -> float | None:
         return None
 
 
-def get_close_price(ticker: str) -> float | None:
+def get_close_price(ticker: str) :
     """Today's closing price (or most recent close)."""
     try:
         hist = yf.Ticker(ticker).history(period="2d")

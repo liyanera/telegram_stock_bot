@@ -82,7 +82,22 @@ def run_preopen():
     else:
         logger.info("No trades — holding current positions.")
 
+    # Notify Telegram group
+    _notify_group(plan, executed if plan.get("trades") else [], trade_date,
+                  portfolio["cash"] if not plan.get("trades") else
+                  get_or_create_portfolio("main")["cash"],
+                  gmv, portfolio_value)
+
     logger.info(f"Pre-open rebalancing complete.\n{'='*60}\n")
+
+
+def _notify_group(plan, executed, trade_date, cash, gmv, portfolio_value):
+    import config
+    if not config.TRADING_GROUP_CHAT_ID:
+        return
+    from trading.notifier import format_preopen_plan, send_to_group
+    msg = format_preopen_plan(plan, executed, trade_date, portfolio_value, cash, gmv)
+    send_to_group(config.TRADING_GROUP_CHAT_ID, msg)
 
 
 if __name__ == "__main__":

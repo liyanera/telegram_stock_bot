@@ -6,7 +6,7 @@ INITIAL_CAPITAL = 1_000_000.0
 MAX_POSITIONS = 10                # max single name count
 MAX_POSITION_PCT = 0.20           # max 20% of GMV per name
 MAX_DAILY_TURNOVER_PCT = 0.10     # max 10% of GMV per day
-MAX_WEEKLY_TURNOVER_PCT = 0.20    # max 20% of GMV per week
+MAX_WEEKLY_TURNOVER_PCT = 0.40    # max 40% of GMV per week
 MIN_TRADE_NOTIONAL = 5_000        # ignore trades smaller than $5k
 
 

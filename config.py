@@ -10,6 +10,7 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 MAX_CONVERSATION_TURNS = int(os.getenv("MAX_CONVERSATION_TURNS", 20))
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+TRADING_GROUP_CHAT_ID = os.getenv("TRADING_GROUP_CHAT_ID", "")
 
 # MySQL — accept Railway's MYSQL_URL or individual vars
 _mysql_url = os.getenv("MYSQL_URL") or os.getenv("DATABASE_URL")

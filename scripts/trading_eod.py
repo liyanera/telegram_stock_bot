@@ -68,6 +68,13 @@ def run_eod():
     )
     logger.info("EOD summary stored to ChromaDB.")
 
+    # Notify Telegram group
+    import config
+    if config.TRADING_GROUP_CHAT_ID:
+        from trading.notifier import format_eod_pnl, send_to_group
+        msg = format_eod_pnl(pre_open_pnl, pre_close_pnl, trade_date)
+        send_to_group(config.TRADING_GROUP_CHAT_ID, msg)
+
     return {"pre_open": pre_open_pnl, "pre_close": pre_close_pnl, "comparison": comparison}
 
 
