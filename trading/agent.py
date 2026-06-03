@@ -12,40 +12,14 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import config
 from trading.constraints import (
-    MAX_POSITIONS, MAX_POSITION_PCT, MAX_DAILY_TURNOVER_PCT,
-    MAX_WEEKLY_TURNOVER_PCT, INITIAL_CAPITAL, constraints_summary
+    get_max_positions, get_max_position_pct, get_max_daily_turnover_pct,
+    get_max_weekly_turnover_pct, get_initial_capital, constraints_summary
 )
+from trading.schema import get_universe, get_all_tickers
 from memory.vector_memory import search as knowledge_search
 
 logger = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
-# ── AI Industry Universe (4 Pillars) ─────────────────────────────────────────
-
-UNIVERSE = {
-    "data_center": {
-        "desc": "Data Center Infrastructure",
-        "tickers": ["NVDA","AMD","AVGO","ANET","MRVL","SMCI","ARM","MSFT","GOOGL","META","AMZN"],
-    },
-    "memory": {
-        "desc": "Memory & Semiconductor Equipment (HBM focus)",
-        "tickers": ["MU","LRCX","KLAC","AMAT","ASML"],
-    },
-    "energy": {
-        "desc": "AI Power & Energy Infrastructure",
-        "tickers": ["CEG","VST","TLN","NEE","NRG","OKLO","SMR"],
-    },
-    "photonics": {
-        "desc": "Photonics, Optical & Interconnects",
-        "tickers": ["COHR","CIEN","LITE","VIAV","FNSR","IIVI"],
-    },
-    "software": {
-        "desc": "AI Software & Platform (supporting)",
-        "tickers": ["PLTR","CRWD","NET","DDOG","NOW","CRM"],
-    },
-}
-
-ALL_TICKERS = [t for sector in UNIVERSE.values() for t in sector["tickers"]]
 
 # Beta estimates for position sizing (approximate)
 BETA_MAP = {
@@ -71,11 +45,23 @@ def _get_ai_framework() -> str:
     return "\n\n".join(c["text"] for c in chunks) if chunks else ""
 
 
+_PILLAR_DESC = {
+    "data_center": "Data Center Infrastructure",
+    "memory":      "Memory & Semiconductor Equipment (HBM focus)",
+    "energy":      "AI Power & Energy Infrastructure",
+    "photonics":   "Photonics, Optical & Interconnects",
+    "software":    "AI Software & Platform (supporting)",
+    "other":       "Other AI-Related",
+}
+
+
 def _build_universe_text(price_map: dict) -> str:
+    universe = get_universe()
     lines = []
-    for sector_key, sector in UNIVERSE.items():
-        lines.append(f"\n[{sector['desc']}]")
-        for t in sector["tickers"]:
+    for pillar, tickers in universe.items():
+        desc = _PILLAR_DESC.get(pillar, pillar)
+        lines.append(f"\n[{desc}]")
+        for t in tickers:
             price = price_map.get(t)
             beta = BETA_MAP.get(t, 1.2)
             if price:
@@ -185,10 +171,10 @@ Positions:
 {ai_framework[:1500] if ai_framework else 'See pillar descriptions above.'}
 
 ## Constraints ({constraints_summary()})
-- Max {MAX_POSITIONS} positions
-- Max {MAX_POSITION_PCT*100:.0f}% per name
-- Daily turnover used: ${today_turnover:,.0f} | limit: ${max(gmv,portfolio_value) * MAX_DAILY_TURNOVER_PCT:,.0f}
-- Weekly turnover used: ${weekly_turnover:,.0f} | limit: ${max(gmv,portfolio_value) * MAX_WEEKLY_TURNOVER_PCT:,.0f}
+- Max {get_max_positions()} positions
+- Max {get_max_position_pct()*100:.0f}% per name
+- Daily turnover used: ${today_turnover:,.0f} | limit: ${max(gmv,portfolio_value) * get_max_daily_turnover_pct():,.0f}
+- Weekly turnover used: ${weekly_turnover:,.0f} | limit: ${max(gmv,portfolio_value) * get_max_weekly_turnover_pct():,.0f}
 
 {strategy_section}
 

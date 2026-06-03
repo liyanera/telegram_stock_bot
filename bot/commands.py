@@ -152,3 +152,98 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     redis_memory.clear_history(user_id)
     await update.message.reply_text("Conversation memory cleared. Fresh start!")
+
+
+# ── Paper Trading Commands ────────────────────────────────────────────────────
+
+async def cmd_universe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current trading universe grouped by pillar."""
+    from trading.schema import get_universe
+    universe = get_universe()
+    if not universe:
+        await update.message.reply_text("Universe is empty. Use /universe_add TICKER PILLAR to add stocks.")
+        return
+    lines = ["<b>📊 Trading Universe</b>\n"]
+    pillar_labels = {
+        "data_center": "🖥 Data Center",
+        "memory":      "💾 Memory / Equipment",
+        "energy":      "⚡ AI Energy",
+        "photonics":   "🔆 Photonics",
+        "software":    "🧠 AI Software",
+        "other":       "🔹 Other",
+    }
+    for pillar, tickers in universe.items():
+        label = pillar_labels.get(pillar, pillar)
+        lines.append(f"<b>{label}</b>: {', '.join(f'<code>{t}</code>' for t in tickers)}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_universe_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/universe_add TICKER PILLAR"""
+    valid_pillars = {"data_center", "memory", "energy", "photonics", "software", "other"}
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /universe_add TICKER PILLAR\n"
+            f"Pillars: {', '.join(sorted(valid_pillars))}"
+        )
+        return
+    ticker = context.args[0].upper()
+    pillar = context.args[1].lower()
+    if pillar not in valid_pillars:
+        await update.message.reply_text(f"Invalid pillar. Choose from: {', '.join(sorted(valid_pillars))}")
+        return
+    from trading.schema import add_to_universe
+    added = add_to_universe(ticker, pillar)
+    if added:
+        await update.message.reply_text(f"✅ Added <code>{ticker}</code> to <b>{pillar}</b>.", parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"<code>{ticker}</code> is already in the universe.", parse_mode="HTML")
+
+
+async def cmd_universe_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/universe_remove TICKER"""
+    if not context.args:
+        await update.message.reply_text("Usage: /universe_remove TICKER")
+        return
+    ticker = context.args[0].upper()
+    from trading.schema import remove_from_universe
+    removed = remove_from_universe(ticker)
+    if removed:
+        await update.message.reply_text(f"✅ Removed <code>{ticker}</code> from universe.", parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"<code>{ticker}</code> not found in active universe.", parse_mode="HTML")
+
+
+async def cmd_trading_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all trading config parameters."""
+    from trading.schema import get_all_trading_config
+    rows = get_all_trading_config()
+    lines = ["<b>⚙️ Trading Config</b>\n"]
+    for r in rows:
+        lines.append(f"<code>{r['key']}</code> = <b>{r['value']}</b>")
+        if r.get("description"):
+            lines.append(f"  <i>{r['description']}</i>")
+    lines.append("\nUse /trading_set KEY VALUE to update.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_trading_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/trading_set KEY VALUE"""
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /trading_set KEY VALUE\nExample: /trading_set max_positions 12")
+        return
+    key = context.args[0].lower()
+    value = context.args[1]
+    from trading.schema import set_trading_config
+    ok = set_trading_config(key, value)
+    if ok:
+        await update.message.reply_text(
+            f"✅ Updated <code>{key}</code> → <b>{value}</b>", parse_mode="HTML"
+        )
+    else:
+        from trading.schema import _DEFAULT_CONFIG
+        await update.message.reply_text(
+            f"Unknown config key: <code>{key}</code>\n"
+            f"Valid keys: {', '.join(f'<code>{k}</code>' for k in _DEFAULT_CONFIG)}",
+            parse_mode="HTML"
+        )

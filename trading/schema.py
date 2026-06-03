@@ -96,6 +96,44 @@ class PortfolioSnapshot(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TradingUniverse(Base):
+    """User-managed AI trading universe — tickers + pillar classification."""
+    __tablename__ = "trading_universe"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), unique=True, index=True)
+    pillar = Column(Enum("data_center", "memory", "energy", "photonics", "software", "other"))
+    active = Column(Boolean, default=True)
+    notes = Column(Text, nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TradingConfig(Base):
+    """Runtime-configurable trading parameters."""
+    __tablename__ = "trading_config"
+    key = Column(String(50), primary_key=True)
+    value = Column(String(200))
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+_DEFAULT_UNIVERSE = {
+    "data_center": ["NVDA", "AMD", "AVGO", "ANET", "MRVL", "SMCI", "ARM", "MSFT", "GOOGL", "META", "AMZN"],
+    "memory":      ["MU", "LRCX", "KLAC", "AMAT", "ASML"],
+    "energy":      ["CEG", "VST", "TLN", "NEE", "NRG", "OKLO", "SMR"],
+    "photonics":   ["COHR", "CIEN", "LITE", "VIAV", "FNSR", "IIVI"],
+    "software":    ["PLTR", "CRWD", "NET", "DDOG", "NOW", "CRM"],
+}
+
+_DEFAULT_CONFIG = {
+    "max_positions":           ("10",       "Max number of open positions"),
+    "max_position_pct":        ("0.20",     "Max portfolio weight per position (0–1)"),
+    "max_daily_turnover_pct":  ("0.10",     "Max daily turnover as fraction of GMV"),
+    "max_weekly_turnover_pct": ("0.40",     "Max weekly turnover as fraction of GMV"),
+    "min_trade_notional":      ("5000",     "Minimum trade size in USD"),
+    "initial_capital":         ("1000000",  "Starting capital in USD"),
+}
+
+
 def init_trading_db():
     Base.metadata.create_all(engine)
 
@@ -234,3 +272,122 @@ def get_pnl_history(plan_type: str, days: int = 30) -> list:
         return [{"date": r[0], "daily_pnl": r[1], "cumulative_pnl": r[2],
                  "portfolio_value": r[3], "gmv": r[4]}
                 for r in reversed(rows)]
+
+
+# ── Trading Universe ──────────────────────────────────────────────────────────
+
+def seed_trading_tables():
+    """Seed universe and config with defaults if tables are empty."""
+    with Session() as s:
+        count = s.execute(text("SELECT COUNT(*) FROM trading_universe")).scalar()
+        if count == 0:
+            for pillar, tickers in _DEFAULT_UNIVERSE.items():
+                for ticker in tickers:
+                    s.add(TradingUniverse(ticker=ticker, pillar=pillar))
+            s.commit()
+
+        count = s.execute(text("SELECT COUNT(*) FROM trading_config")).scalar()
+        if count == 0:
+            for key, (value, description) in _DEFAULT_CONFIG.items():
+                s.add(TradingConfig(key=key, value=value, description=description))
+            s.commit()
+
+
+def get_universe() -> dict:
+    """Returns {pillar: [tickers]} for all active tickers."""
+    with Session() as s:
+        rows = s.execute(
+            text("SELECT ticker, pillar FROM trading_universe WHERE active=1 ORDER BY pillar, ticker")
+        ).fetchall()
+    result: dict[str, list] = {}
+    for ticker, pillar in rows:
+        result.setdefault(pillar, []).append(ticker)
+    return result if result else _DEFAULT_UNIVERSE
+
+
+def get_all_tickers() -> list:
+    """Flat list of all active tickers in the universe."""
+    universe = get_universe()
+    return [t for tickers in universe.values() for t in tickers]
+
+
+def add_to_universe(ticker: str, pillar: str, notes: str = "") -> bool:
+    """Add or reactivate a ticker. Returns False if already active."""
+    ticker = ticker.upper()
+    with Session() as s:
+        row = s.execute(
+            text("SELECT id, active FROM trading_universe WHERE ticker=:t"),
+            {"t": ticker}
+        ).first()
+        if row and row[1]:
+            return False
+        if row and not row[1]:
+            s.execute(
+                text("UPDATE trading_universe SET active=1, pillar=:p, notes=:n WHERE ticker=:t"),
+                {"p": pillar, "n": notes, "t": ticker}
+            )
+        else:
+            s.add(TradingUniverse(ticker=ticker, pillar=pillar, notes=notes))
+        s.commit()
+    return True
+
+
+def remove_from_universe(ticker: str) -> bool:
+    """Soft-delete a ticker. Returns False if not found."""
+    ticker = ticker.upper()
+    with Session() as s:
+        row = s.execute(
+            text("SELECT id FROM trading_universe WHERE ticker=:t AND active=1"),
+            {"t": ticker}
+        ).first()
+        if not row:
+            return False
+        s.execute(
+            text("UPDATE trading_universe SET active=0 WHERE ticker=:t"),
+            {"t": ticker}
+        )
+        s.commit()
+    return True
+
+
+# ── Trading Config ────────────────────────────────────────────────────────────
+
+def get_trading_config(key: str) -> str | None:
+    """Get a config value as string. Returns None if not found."""
+    with Session() as s:
+        row = s.execute(
+            text("SELECT value FROM trading_config WHERE key=:k"),
+            {"k": key}
+        ).first()
+    return row[0] if row else None
+
+
+def set_trading_config(key: str, value: str) -> bool:
+    """Upsert a config value. Returns False if key is not a recognised parameter."""
+    if key not in _DEFAULT_CONFIG:
+        return False
+    with Session() as s:
+        row = s.execute(
+            text("SELECT key FROM trading_config WHERE key=:k"), {"k": key}
+        ).first()
+        if row:
+            s.execute(
+                text("UPDATE trading_config SET value=:v, updated_at=NOW() WHERE key=:k"),
+                {"v": str(value), "k": key}
+            )
+        else:
+            desc = _DEFAULT_CONFIG[key][1]
+            s.add(TradingConfig(key=key, value=str(value), description=desc))
+        s.commit()
+    return True
+
+
+def get_all_trading_config() -> list:
+    """Returns all config rows as [{key, value, description}]."""
+    with Session() as s:
+        rows = s.execute(
+            text("SELECT key, value, description FROM trading_config ORDER BY key")
+        ).fetchall()
+    if rows:
+        return [{"key": r[0], "value": r[1], "description": r[2]} for r in rows]
+    return [{"key": k, "value": v, "description": d} for k, (v, d) in _DEFAULT_CONFIG.items()]

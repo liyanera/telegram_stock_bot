@@ -4,8 +4,11 @@ from bot.handlers import handle_message
 from bot.commands import (
     cmd_start, cmd_help, cmd_watchlist,
     cmd_add, cmd_remove, cmd_risk, cmd_clear, cmd_portfolio,
+    cmd_universe, cmd_universe_add, cmd_universe_remove,
+    cmd_trading_config, cmd_trading_set,
 )
 from memory.mysql_memory import init_db, get_all_theses_ranked
+from trading.schema import init_trading_db, seed_trading_tables
 from memory.redis_memory import ping as redis_ping
 from memory.vector_memory import add_knowledge_bulk, update_credibility
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -198,6 +201,8 @@ def _start_scheduler() -> BackgroundScheduler:
 def main():
     logger.info("Initializing database...")
     init_db()
+    init_trading_db()
+    seed_trading_tables()
 
     if redis_ping():
         logger.info("Redis connected.")
@@ -223,6 +228,11 @@ def main():
     app.add_handler(CommandHandler("risk", cmd_risk))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
+    app.add_handler(CommandHandler("universe", cmd_universe))
+    app.add_handler(CommandHandler("universe_add", cmd_universe_add))
+    app.add_handler(CommandHandler("universe_remove", cmd_universe_remove))
+    app.add_handler(CommandHandler("trading_config", cmd_trading_config))
+    app.add_handler(CommandHandler("trading_set", cmd_trading_set))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot started. Listening...")

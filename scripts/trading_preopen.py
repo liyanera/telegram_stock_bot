@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from trading.schema import init_trading_db, get_or_create_portfolio, get_positions, save_plan
-from trading.agent import generate_rebalancing_plan, UNIVERSE
+from trading.agent import generate_rebalancing_plan
+from trading.schema import get_all_tickers
 from trading.executor import execute_plan
 from trading.prices import get_prices_batch, calculate_gmv
 from trading.schema import get_weekly_turnover
@@ -28,7 +29,7 @@ def run_preopen():
     cash = portfolio["cash"]
 
     # Price basis: previous close
-    all_tickers = list({p["ticker"] for p in positions} | set(UNIVERSE[:20]))
+    all_tickers = list({p["ticker"] for p in positions} | set(get_all_tickers()))
     price_map = get_prices_batch(all_tickers, "prev_close")
     price_map = {k: v for k, v in price_map.items() if v}
 

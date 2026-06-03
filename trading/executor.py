@@ -10,7 +10,7 @@ from trading.schema import (
     get_or_create_portfolio, update_cash, get_positions,
     upsert_position, save_order, get_weekly_turnover
 )
-from trading.constraints import validate_plan, MIN_TRADE_NOTIONAL
+from trading.constraints import validate_plan, get_min_trade_notional
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def execute_plan(
         shares = abs(trade["shares"])
         notional = shares * exec_price
 
-        if notional < MIN_TRADE_NOTIONAL:
+        if notional < get_min_trade_notional():
             skipped.append({"ticker": ticker, "reason": f"notional ${notional:.0f} below min"})
             continue
 
