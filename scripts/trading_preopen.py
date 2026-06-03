@@ -66,6 +66,7 @@ def run_preopen():
     )
 
     # Execute trades
+    executed = []
     if plan.get("trades"):
         result = execute_plan(
             plan_id=plan_id,
@@ -75,18 +76,18 @@ def run_preopen():
             price_benchmark="prev_close",
             trade_date=trade_date,
         )
-        logger.info(f"Executed: {len(result['executed'])} trades | "
-                    f"Skipped: {len(result['skipped'])}")
+        executed = result["executed"]
+        logger.info(f"Executed: {len(executed)} trades | Skipped: {len(result['skipped'])}")
         if result["violations"]:
             logger.warning(f"Violations: {result['violations']}")
     else:
         logger.info("No trades — holding current positions.")
 
     # Notify Telegram group
-    _notify_group(plan, executed if plan.get("trades") else [], trade_date,
-                  portfolio["cash"] if not plan.get("trades") else
-                  get_or_create_portfolio("main")["cash"],
-                  gmv, portfolio_value)
+    final = get_or_create_portfolio("main")
+    new_gmv = sum(t["notional"] for t in executed) if executed else gmv
+    _notify_group(plan, executed, trade_date, final["cash"], new_gmv,
+                  final["cash"] + new_gmv)
 
     logger.info(f"Pre-open rebalancing complete.\n{'='*60}\n")
 
