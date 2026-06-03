@@ -5,9 +5,9 @@ from bot.commands import (
     cmd_start, cmd_help, cmd_watchlist,
     cmd_add, cmd_remove, cmd_risk, cmd_clear, cmd_portfolio,
 )
-from memory.mysql_memory import init_db
+from memory.mysql_memory import init_db, get_all_theses_ranked
 from memory.redis_memory import ping as redis_ping
-from memory.vector_memory import add_knowledge_bulk
+from memory.vector_memory import add_knowledge_bulk, update_credibility
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import config
@@ -40,6 +40,20 @@ def _seed_knowledge():
     if docs:
         add_knowledge_bulk(docs)
         logger.info(f"Knowledge base seeded: {len(docs)} chunks from {knowledge_dir}")
+
+
+def _sync_credibility_from_mysql():
+    """Push credibility scores from MySQL → ChromaDB metadata after seeding from .md files."""
+    try:
+        theses = get_all_theses_ranked(thesis_type="all", limit=500)
+        updated = 0
+        for t in theses:
+            if t.get("chroma_doc_id"):
+                update_credibility(t["chroma_doc_id"], t["credibility"])
+                updated += 1
+        logger.info(f"Credibility synced: {updated} theses updated in ChromaDB")
+    except Exception as e:
+        logger.warning(f"Credibility sync failed (non-fatal): {e}")
 
 
 def _run_weekly_research():
@@ -192,6 +206,9 @@ def main():
 
     logger.info("Seeding knowledge base...")
     _seed_knowledge()
+
+    logger.info("Syncing thesis credibility from MySQL...")
+    _sync_credibility_from_mysql()
 
     logger.info("Starting weekly scheduler...")
     scheduler = _start_scheduler()

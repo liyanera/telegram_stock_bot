@@ -4,11 +4,13 @@ Weekly Price Monitor — runs every Monday.
 2. If yes: ask Claude whether the move aligns with stored theses
 3. Update credibility in MySQL + ChromaDB
 4. Save new price snapshot
+5. Write price alert assessments to knowledge/price_alerts_{date}.md + git commit
 
 Run: python scripts/weekly_monitor.py
 """
 import sys
 import json
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -78,6 +80,44 @@ Return ONLY valid JSON array:
         return []
 
 
+def _save_alerts_to_file(alerts_log: list, date_str: str):
+    """Write price alert assessments to knowledge/ and git commit."""
+    if not alerts_log:
+        return
+    lines = [f"# Weekly Price Alerts — {date_str}\n"]
+    for entry in alerts_log:
+        direction = "▲" if entry["change_pct"] > 0 else "▼"
+        lines.append(
+            f"## {entry['ticker']} {direction}{abs(entry['change_pct']):.1f}% "
+            f"(${entry['last_price']} → ${entry['current_price']})"
+        )
+        for a in entry["assessments"]:
+            status = "CONFIRMED" if a["consistent"] else "CONTRADICTED"
+            lines.append(f"- Thesis #{a['thesis_id']} {status}: {a['reason']}")
+        lines.append("")
+
+    out_path = Path(__file__).parent.parent / "knowledge" / f"price_alerts_{date_str}.md"
+    out_path.write_text("\n".join(lines))
+    print(f"Saved alerts to file: {out_path}")
+
+    repo_root = Path(__file__).parent.parent
+    try:
+        subprocess.run(["git", "add", "knowledge/"], cwd=repo_root, check=True)
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=repo_root
+        )
+        if result.returncode != 0:
+            subprocess.run(
+                ["git", "commit", "-m", f"Weekly monitor alerts: {date_str}"],
+                cwd=repo_root, check=True,
+            )
+            print(f"Git committed: knowledge/price_alerts_{date_str}.md")
+        else:
+            print("No new alert changes to commit.")
+    except Exception as e:
+        print(f"Git commit skipped: {e}")
+
+
 def run_monitor():
     mysql_memory.init_db()
     tickers = mysql_memory.get_all_monitored_tickers()
@@ -113,8 +153,6 @@ def run_monitor():
 
         if abs(change_pct) >= THRESHOLD:
             print(f"    ⚡ >10% move detected — analyzing thesis consistency...")
-            alerts.append({"ticker": ticker, "change_pct": change_pct,
-                           "last_price": last_price, "current_price": current_price})
 
             theses = mysql_memory.get_theses(ticker)
             if not theses:
@@ -128,10 +166,10 @@ def run_monitor():
                     consistent = assessment.get("consistent", False)
                     reason = assessment.get("reason", "")
 
-                    # Update MySQL credibility
+                    # Update MySQL credibility (source of truth)
                     new_cred = mysql_memory.update_thesis_credibility(thesis_id, consistent)
 
-                    # Update ChromaDB credibility
+                    # Update ChromaDB credibility (best-effort, rebuilt from MySQL on startup)
                     thesis_row = next((t for t in theses if t["id"] == thesis_id), None)
                     if thesis_row and thesis_row.get("chroma_doc_id"):
                         update_credibility(thesis_row["chroma_doc_id"], new_cred or 0.5)
@@ -140,7 +178,21 @@ def run_monitor():
                     print(f"    Thesis #{thesis_id}: {status} (credibility → {new_cred:.2f})")
                     print(f"      Reason: {reason}")
 
-                # Save the assessment itself to knowledge base for future reference
+                # Collect for file persistence
+                alerts.append({
+                    "ticker": ticker,
+                    "change_pct": change_pct,
+                    "last_price": last_price,
+                    "current_price": current_price,
+                    "assessments": [
+                        {"thesis_id": a.get("thesis_id"),
+                         "consistent": a.get("consistent", False),
+                         "reason": a.get("reason", "")}
+                        for a in assessments
+                    ],
+                })
+
+                # Keep ChromaDB warm for current session
                 assessment_text = (
                     f"[PRICE ALERT {date_str}] {ticker} moved {change_pct:+.1f}%.\n"
                     + "\n".join(
@@ -166,6 +218,9 @@ def run_monitor():
     if not alerts:
         print("  No significant moves this week.")
     print(f"{'='*60}\n")
+
+    # Persist to Git — survives Railway redeployments
+    _save_alerts_to_file(alerts, date_str)
 
 
 if __name__ == "__main__":
